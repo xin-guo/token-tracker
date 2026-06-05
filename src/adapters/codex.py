@@ -101,31 +101,35 @@ def _extract_rate_limits(path: Path, models: dict[str, str]) -> RateLimits | Non
         return None
 
     rl, ts, sid = last_rl
-    primary = rl.get("primary") or {}
-    secondary = rl.get("secondary") or {}
-
-    five_pct = primary.get("used_percent")
-    five_reset = primary.get("resets_at")
-    seven_pct = secondary.get("used_percent")
-    seven_reset = secondary.get("resets_at")
 
     now_ts = datetime.now(timezone.utc).timestamp()
-    if five_reset and five_reset < now_ts:
-        five_pct = 0.0
-    if seven_reset and seven_reset < now_ts:
-        seven_pct = 0.0
+    five_pct = five_reset = None
+    seven_pct = seven_reset = None
+
+    # 按 window_minutes 字段分配 5h / 7d 桶，
+    # 而不是固定 primary→5h、secondary→7d（free plan 实测 primary 为 7 天窗口）
+    for bucket in (rl.get("primary"), rl.get("secondary")):
+        if not bucket:
+            continue
+        pct = bucket.get("used_percent")
+        resets = bucket.get("resets_at")
+        window = bucket.get("window_minutes") or 0
+        if resets and resets < now_ts:
+            pct = 0.0
+        if window < 1440:
+            five_pct, five_reset = pct, resets
+        else:
+            seven_pct, seven_reset = pct, resets
 
     if five_pct is None and seven_pct is None:
         return None
-
-    model_name = models.get(sid, "")
 
     return RateLimits(
         five_hour_pct=five_pct,
         five_hour_resets_at=five_reset,
         seven_day_pct=seven_pct,
         seven_day_resets_at=seven_reset,
-        model=model_name,
+        model=models.get(sid, ""),
         updated_at=ts,
     )
 

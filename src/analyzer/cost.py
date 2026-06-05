@@ -43,18 +43,22 @@ def calculate_cost(entry: UsageEntry) -> float:
 
 
 def _resolve_model_key(model: str, pricing: dict) -> str | None:
+    if not model:
+        return None
     if model in pricing:
         return model
 
-    for key in pricing:
-        if model in key or key in model:
-            return key
-
-    model_lower = model.lower()
-    for key in pricing:
-        if model_lower in key.lower() or key.lower() in model_lower:
-            return key
-
+    ml = model.lower()
+    # model 以 key 为前缀：处理 dated/variant 后缀（gpt-5-codex-2025-12-01 → gpt-5-codex）
+    # 取最长匹配，避免 gpt-5 误吞 gpt-5-codex-* 这种更具体的 key
+    prefix_keys = [k for k in pricing if ml.startswith(k.lower())]
+    if prefix_keys:
+        return max(prefix_keys, key=len)
+    # 反向兜底：key 以 model + "-" 开头（gpt-5 命中 gpt-5-2025-08-07）
+    # 加 "-" 锚点避免 gpt-5 撞上 gpt-5-mini
+    suffix_keys = [k for k in pricing if k.lower().startswith(ml + "-")]
+    if suffix_keys:
+        return min(suffix_keys, key=len)
     return None
 
 
