@@ -12,13 +12,16 @@ def _write_session(tmp_path: Path, events: list[dict]) -> Path:
     return p
 
 
-def _token_count_event(rate_limits: dict) -> dict:
+def _token_count_event(rate_limits: dict, context_window: int | None = 258400) -> dict:
+    info = {"total_token_usage": {"input_tokens": 1, "output_tokens": 1}}
+    if context_window is not None:
+        info["model_context_window"] = context_window
     return {
         "timestamp": "2026-06-04T20:00:00.000Z",
         "type": "event_msg",
         "payload": {
             "type": "token_count",
-            "info": {"total_token_usage": {"input_tokens": 1, "output_tokens": 1}},
+            "info": info,
             "rate_limits": rate_limits,
         },
     }
@@ -30,6 +33,7 @@ def test_free_plan_7d_bucket_routed_correctly(tmp_path):
     rl = {
         "primary": {"used_percent": 42.0, "window_minutes": 10080, "resets_at": 9_999_999_999},
         "secondary": None,
+        "plan_type": "free",
     }
     path = _write_session(tmp_path, [_token_count_event(rl)])
     result = codex._extract_rate_limits(path, models={})
@@ -37,12 +41,15 @@ def test_free_plan_7d_bucket_routed_correctly(tmp_path):
     assert result is not None
     assert result.seven_day_pct == 42.0
     assert result.five_hour_pct is None
+    assert result.plan_type == "free"
+    assert result.context_window == 258400
 
 
 def test_paid_plan_both_buckets_routed(tmp_path):
     rl = {
         "primary": {"used_percent": 12.0, "window_minutes": 300, "resets_at": 9_999_999_999},
         "secondary": {"used_percent": 60.0, "window_minutes": 10080, "resets_at": 9_999_999_999},
+        "plan_type": "pro",
     }
     path = _write_session(tmp_path, [_token_count_event(rl)])
     result = codex._extract_rate_limits(path, models={})
@@ -50,6 +57,7 @@ def test_paid_plan_both_buckets_routed(tmp_path):
     assert result is not None
     assert result.five_hour_pct == 12.0
     assert result.seven_day_pct == 60.0
+    assert result.plan_type == "pro"
 
 
 def test_swapped_window_order_still_routed_by_window_minutes(tmp_path):

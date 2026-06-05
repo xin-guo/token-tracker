@@ -71,7 +71,7 @@ def load_rate_limits() -> RateLimits | None:
 
 def _extract_rate_limits(path: Path, models: dict[str, str]) -> RateLimits | None:
     session_id = ""
-    last_rl = None
+    last_payload = None
     try:
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
@@ -93,14 +93,14 @@ def _extract_rate_limits(path: Path, models: dict[str, str]) -> RateLimits | Non
                     continue
                 rl = payload.get("rate_limits")
                 if rl:
-                    last_rl = (rl, data.get("timestamp", ""), session_id)
+                    last_payload = (rl, payload.get("info") or {}, data.get("timestamp", ""), session_id)
     except (OSError, PermissionError):
         return None
 
-    if not last_rl:
+    if not last_payload:
         return None
 
-    rl, ts, sid = last_rl
+    rl, info, ts, sid = last_payload
 
     now_ts = datetime.now(timezone.utc).timestamp()
     five_pct = five_reset = None
@@ -131,6 +131,8 @@ def _extract_rate_limits(path: Path, models: dict[str, str]) -> RateLimits | Non
         seven_day_resets_at=seven_reset,
         model=models.get(sid, ""),
         updated_at=ts,
+        plan_type=rl.get("plan_type") or "",
+        context_window=info.get("model_context_window"),
     )
 
 

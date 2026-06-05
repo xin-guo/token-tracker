@@ -125,4 +125,33 @@ def _fallback_pricing() -> dict:
             "cache_creation_input_token_cost": 1e-6,
             "cache_read_input_token_cost": 0.08e-6,
         },
+        "gpt-5": {
+            "input_cost_per_token": 1.25e-6,
+            "output_cost_per_token": 10e-6,
+            "cache_read_input_token_cost": 0.125e-6,
+        },
+        "gpt-5-codex": {
+            "input_cost_per_token": 1.25e-6,
+            "output_cost_per_token": 10e-6,
+            "cache_read_input_token_cost": 0.125e-6,
+        },
+        "gpt-5-mini": {
+            "input_cost_per_token": 0.25e-6,
+            "output_cost_per_token": 2e-6,
+            "cache_read_input_token_cost": 0.025e-6,
+        },
+        "gpt-5-nano": {
+            "input_cost_per_token": 0.05e-6,
+            "output_cost_per_token": 0.4e-6,
+            "cache_read_input_token_cost": 0.005e-6,
+        },
+        "gpt-5-pro": {
+            "input_cost_per_token": 15e-6,
+            "output_cost_per_token": 120e-6,
+        },
+        "codex-mini-latest": {
+            "input_cost_per_token": 1.5e-6,
+            "output_cost_per_token": 6e-6,
+            "cache_read_input_token_cost": 0.375e-6,
+        },
     }

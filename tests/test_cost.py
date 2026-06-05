@@ -92,7 +92,7 @@ def test_dated_variant_resolves_to_longest_base(openai_pricing):
     assert cost.calculate_cost(entry) == pytest.approx(1.25)
 
 
-def test_base_name_resolves_to_dated_pricing(monkeypatch):
+def test_base_name_resolves_to_dated_pricing(openai_pricing, monkeypatch):
     # Reverse-direction fallback: pricing only has dated keys, model is the base name.
     pricing = {
         "gpt-5-2025-08-07": {"input_cost_per_token": 1.25e-6, "output_cost_per_token": 10e-6},
@@ -102,3 +102,10 @@ def test_base_name_resolves_to_dated_pricing(monkeypatch):
     entry = make_entry(model="gpt-5", input_tokens=1_000_000)
     # Must pick gpt-5-2025-08-07 (shorter), not gpt-5-mini-2025-08-07.
     assert cost.calculate_cost(entry) == pytest.approx(1.25)
+
+
+def test_fallback_pricing_includes_openai_models():
+    pricing = cost._fallback_pricing()
+    for k in ("gpt-5", "gpt-5-codex", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "codex-mini-latest"):
+        assert k in pricing, f"fallback pricing missing {k}"
+        assert pricing[k].get("input_cost_per_token", 0) > 0
