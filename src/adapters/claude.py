@@ -108,7 +108,7 @@ def _parse_jsonl(
                 seen.add(entry.dedup_key)
 
                 entries.append(entry)
-    except (OSError, PermissionError):
+    except OSError:
         pass
 
 

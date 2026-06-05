@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from urllib.error import URLError
 
 import pytest
 
@@ -8,7 +9,7 @@ from src.analyzer import cost
 
 def make_entry(**kw):
     defaults = dict(
-        timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         session_id="s1",
         message_id="m1",
         request_id="r1",
@@ -109,3 +110,38 @@ def test_fallback_pricing_includes_openai_models():
     for k in ("gpt-5", "gpt-5-codex", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "codex-mini-latest"):
         assert k in pricing, f"fallback pricing missing {k}"
         assert pricing[k].get("input_cost_per_token", 0) > 0
+
+
+def test_fresh_cache_is_used_without_fetching(tmp_path, monkeypatch):
+    cache = tmp_path / "pricing_cache.json"
+    cache.write_text('{"gpt-5": {"input_cost_per_token": 1e-6}}', encoding="utf-8")
+    monkeypatch.setattr(cost, "CACHE_PATH", cache)
+    monkeypatch.setattr(cost, "_cache_stale", lambda: False)
+    # 新鲜缓存命中时绝不能联网
+    monkeypatch.setattr(cost, "_fetch_and_cache", lambda: (_ for _ in ()).throw(AssertionError("不应联网")))
+    assert cost._load_pricing() == {"gpt-5": {"input_cost_per_token": 1e-6}}
+
+
+def test_stale_cache_kept_when_fetch_fails(tmp_path, monkeypatch):
+    # 关键：缓存过期但联网失败时，应保留旧缓存而非掉到内置兜底
+    cache = tmp_path / "pricing_cache.json"
+    cache.write_text('{"gpt-5": {"input_cost_per_token": 9e-6}}', encoding="utf-8")
+    monkeypatch.setattr(cost, "CACHE_PATH", cache)
+    monkeypatch.setattr(cost, "_cache_stale", lambda: True)
+
+    def boom():
+        raise URLError("offline")
+
+    monkeypatch.setattr(cost, "_fetch_and_cache", boom)
+    assert cost._load_pricing() == {"gpt-5": {"input_cost_per_token": 9e-6}}
+
+
+def test_builtin_fallback_only_when_no_cache_and_fetch_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(cost, "CACHE_PATH", tmp_path / "missing.json")
+
+    def boom():
+        raise TimeoutError("offline")
+
+    monkeypatch.setattr(cost, "_fetch_and_cache", boom)
+    result = cost._load_pricing()
+    assert "gpt-5" in result and "claude-opus-4-7" in result  # 命中内置兜底表

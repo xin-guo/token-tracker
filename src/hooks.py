@@ -25,9 +25,11 @@ CODEX_STATUS_LINE = [
     "model-with-reasoning",
 ]
 
+# HOOK_VERSION 是唯一版本来源；__HOOK_VERSION__ 占位符在 _render_hook_script() 里注入。
+# 不要用 f-string：HOOK_SCRIPT 是含 \033 与正则的 r-string，f-string 会破坏花括号。
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
 """Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json"""
-__version__ = "1.5"
+__version__ = "__HOOK_VERSION__"
 import json, os, re, subprocess, sys, tempfile
 from datetime import datetime, timezone
 
@@ -268,6 +270,11 @@ if __name__ == "__main__":
 
 # --- helpers ---
 
+def _render_hook_script() -> str:
+    """把 HOOK_VERSION 注入占位符，得到要落盘的状态栏脚本（唯一版本来源）。"""
+    return HOOK_SCRIPT.replace("__HOOK_VERSION__", HOOK_VERSION)
+
+
 def _status_line_toml(items: list[str]) -> str:
     body = ",\n".join(f'  "{item}"' for item in items)
     return f"status_line = [\n{body},\n]"
@@ -327,7 +334,7 @@ def update_hook() -> None:
     if not os.path.isdir(os.path.dirname(HOOK_SCRIPT_PATH)):
         return
     with open(HOOK_SCRIPT_PATH, "w", encoding="utf-8") as f:
-        f.write(HOOK_SCRIPT)
+        f.write(_render_hook_script())
     if os.name != "nt":
         os.chmod(HOOK_SCRIPT_PATH, os.stat(HOOK_SCRIPT_PATH).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 

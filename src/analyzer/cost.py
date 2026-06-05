@@ -1,14 +1,23 @@
 import json
 import os
+import ssl
+import sys
+import time
 import urllib.request
 from pathlib import Path
+from urllib.error import URLError
 
 from ..adapters.types import UsageEntry
 
 LITELLM_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
-CACHE_PATH = Path(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))) / "pricing_cache.json"
+# 缓存放用户可写目录：包根目录在 site-packages 下是只读的，写失败会导致每次都联网
+CACHE_DIR = Path(os.path.expanduser("~/.cache/token-tracker"))
+CACHE_PATH = CACHE_DIR / "pricing_cache.json"
+CACHE_TTL_SECONDS = 7 * 24 * 3600  # 定价表 7 天过期，过期后尝试刷新（失败仍用旧缓存兜底）
+_INSECURE_TLS_ENV = "TT_PRICING_INSECURE_TLS"
 
 _pricing: dict | None = None
+_warned_insecure = False
 
 
 def get_pricing() -> dict:
@@ -63,40 +72,76 @@ def _resolve_model_key(model: str, pricing: dict) -> str | None:
 
 
 def _load_pricing() -> dict:
-    if CACHE_PATH.exists():
-        try:
-            with open(CACHE_PATH) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
+    cached = _read_cache()
+    if cached is not None and not _cache_stale():
+        return cached
 
+    # 缓存缺失或过期 → 尝试联网刷新；失败时优先用旧缓存（哪怕过期），最后才用内置兜底
     try:
         return _fetch_and_cache()
-    except Exception:
+    except (URLError, TimeoutError, ssl.SSLError, OSError, json.JSONDecodeError):
+        if cached is not None:
+            return cached
         return _fallback_pricing()
 
 
-def _fetch_and_cache() -> dict:
-    import ssl
-    ctx = ssl.create_default_context()
+def _read_cache() -> dict | None:
     try:
-        req = urllib.request.Request(LITELLM_URL, headers={"User-Agent": "token-tracker/0.1"})
-        with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
-            data = json.loads(resp.read().decode())
+        with open(CACHE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _cache_stale() -> bool:
+    try:
+        age = time.time() - CACHE_PATH.stat().st_mtime
+    except OSError:
+        return True
+    return age > CACHE_TTL_SECONDS
+
+
+def _fetch_and_cache() -> dict:
+    try:
+        data = _fetch(verify=True)
     except ssl.SSLCertVerificationError:
+        # 默认不静默降级 TLS：仅当用户显式 TT_PRICING_INSECURE_TLS=1 时才放行（抓的是公开定价表）
+        if os.environ.get(_INSECURE_TLS_ENV) != "1":
+            raise
+        _warn_insecure_once()
+        data = _fetch(verify=False)
+
+    _write_cache(data)
+    return data
+
+
+def _fetch(verify: bool) -> dict:
+    ctx = ssl.create_default_context()
+    if not verify:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request(LITELLM_URL, headers={"User-Agent": "token-tracker/0.1"})
-        with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
-            data = json.loads(resp.read().decode())
+    req = urllib.request.Request(LITELLM_URL, headers={"User-Agent": "token-tracker/0.1"})
+    with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+        return json.loads(resp.read().decode())
 
+
+def _write_cache(data: dict) -> None:
     try:
-        with open(CACHE_PATH, "w") as f:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CACHE_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f)
     except OSError:
         pass
 
-    return data
+
+def _warn_insecure_once() -> None:
+    global _warned_insecure
+    if not _warned_insecure:
+        print(
+            f"token-tracker: 已按 {_INSECURE_TLS_ENV}=1 关闭 TLS 证书校验（仅用于抓取公开定价表）",
+            file=sys.stderr,
+        )
+        _warned_insecure = True
 
 
 def _fallback_pricing() -> dict:

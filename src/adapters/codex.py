@@ -9,6 +9,7 @@ from .types import AgentInfo, RateLimits, UsageEntry
 CODEX_DIR = os.path.expanduser("~/.codex")
 SESSIONS_DIR = os.path.join(CODEX_DIR, "sessions")
 STATE_DB = os.path.join(CODEX_DIR, "state_5.sqlite")
+_RATE_LIMIT_SCAN_FILES = 5  # 只扫最近改动的 N 个 session 文件找限额信息
 
 
 def detect() -> AgentInfo | None:
@@ -59,14 +60,22 @@ def load_rate_limits() -> RateLimits | None:
     if not sessions_path.is_dir():
         return None
 
-    jsonl_files = sorted(sessions_path.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    # session 文件在轮转，rglob 与 stat 之间文件可能消失：mtime 取不到时退化为 0，避免整体崩溃
+    jsonl_files = sorted(sessions_path.rglob("*.jsonl"), key=_safe_mtime, reverse=True)
     models = _load_thread_models()
 
-    for path in jsonl_files[:5]:
+    for path in jsonl_files[:_RATE_LIMIT_SCAN_FILES]:
         rl = _extract_rate_limits(path, models)
         if rl:
             return rl
     return None
+
+
+def _safe_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _extract_rate_limits(path: Path, models: dict[str, str]) -> RateLimits | None:
@@ -94,7 +103,7 @@ def _extract_rate_limits(path: Path, models: dict[str, str]) -> RateLimits | Non
                 rl = payload.get("rate_limits")
                 if rl:
                     last_payload = (rl, payload.get("info") or {}, data.get("timestamp", ""), session_id)
-    except (OSError, PermissionError):
+    except OSError:
         return None
 
     if not last_payload:
@@ -194,7 +203,7 @@ def _parse_jsonl(
                     if info and info.get("total_token_usage"):
                         last_usage = info["total_token_usage"]
                         msg_count += 1
-    except (OSError, PermissionError):
+    except OSError:
         return
 
     if not last_usage or not session_id:
