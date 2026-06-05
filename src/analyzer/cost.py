@@ -1,3 +1,4 @@
+import http.client
 import json
 import os
 import ssl
@@ -76,10 +77,13 @@ def _load_pricing() -> dict:
     if cached is not None and not _cache_stale():
         return cached
 
-    # 缓存缺失或过期 → 尝试联网刷新；失败时优先用旧缓存（哪怕过期），最后才用内置兜底
+    # 缓存缺失或过期 → 尝试联网刷新；失败时优先用旧缓存（哪怕过期），最后才用内置兜底。
+    # 异常集要覆盖整条抓取链：URLError/TimeoutError/ssl.SSLError/OSError（网络与 socket），
+    # http.client.HTTPException（IncompleteRead 等截断响应），ValueError（JSON 解析 + decode 失败）。
+    # 仍不用裸 except，避免吞掉 AttributeError/KeyError 这类真 bug。
     try:
         return _fetch_and_cache()
-    except (URLError, TimeoutError, ssl.SSLError, OSError, json.JSONDecodeError):
+    except (URLError, TimeoutError, ssl.SSLError, OSError, http.client.HTTPException, ValueError):
         if cached is not None:
             return cached
         return _fallback_pricing()

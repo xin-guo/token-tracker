@@ -1,3 +1,5 @@
+import http.client
+import json
 from datetime import UTC, datetime
 from urllib.error import URLError
 
@@ -145,3 +147,22 @@ def test_builtin_fallback_only_when_no_cache_and_fetch_fails(tmp_path, monkeypat
     monkeypatch.setattr(cost, "_fetch_and_cache", boom)
     result = cost._load_pricing()
     assert "gpt-5" in result and "claude-opus-4-7" in result  # 命中内置兜底表
+
+
+@pytest.mark.parametrize("exc", [
+    http.client.IncompleteRead(b""),          # 截断的 HTTP/1.1 响应
+    UnicodeDecodeError("utf-8", b"", 0, 1, "bad"),  # resp.read().decode() 失败（ValueError 子类）
+    json.JSONDecodeError("bad", "", 0),        # 损坏的 JSON
+])
+def test_stale_cache_survives_middownload_errors(tmp_path, monkeypatch, exc):
+    # 回归：抓取链中途抛 HTTPException/decode/JSON 错误时，必须用旧缓存兜底而非崩溃
+    cache = tmp_path / "pricing_cache.json"
+    cache.write_text('{"gpt-5": {"input_cost_per_token": 7e-6}}', encoding="utf-8")
+    monkeypatch.setattr(cost, "CACHE_PATH", cache)
+    monkeypatch.setattr(cost, "_cache_stale", lambda: True)
+
+    def boom():
+        raise exc
+
+    monkeypatch.setattr(cost, "_fetch_and_cache", boom)
+    assert cost._load_pricing() == {"gpt-5": {"input_cost_per_token": 7e-6}}
