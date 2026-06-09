@@ -20,12 +20,20 @@ _INSECURE_TLS_ENV = "TT_PRICING_INSECURE_TLS"
 _pricing: dict | None = None
 _warned_insecure = False
 
+# 未知的新 Claude 模型按系列退回最新已知价（这些 key 由 _fallback_pricing 保证存在）
+_FAMILY_FALLBACK = (
+    ("claude-opus", "claude-opus-4-8"),
+    ("claude-sonnet", "claude-sonnet-4-6"),
+    ("claude-haiku", "claude-haiku-4-5-20251001"),
+)
+
 
 def get_pricing() -> dict:
     global _pricing
     if _pricing is not None:
         return _pricing
-    _pricing = _load_pricing()
+    # 以 litellm 数据为准，_fallback_pricing 作为已知价底座补 litellm 尚未收录的新模型（如最新 Opus）
+    _pricing = {**_fallback_pricing(), **_load_pricing()}
     return _pricing
 
 
@@ -69,6 +77,11 @@ def _resolve_model_key(model: str, pricing: dict) -> str | None:
     suffix_keys = [k for k in pricing if k.lower().startswith(ml + "-")]
     if suffix_keys:
         return min(suffix_keys, key=len)
+
+    # 同系列兜底：未知的新 Claude 模型（litellm 收录滞后）退回同系列最新已知价，避免成本静默归零
+    for prefix, fallback_key in _FAMILY_FALLBACK:
+        if ml.startswith(prefix) and fallback_key in pricing:
+            return fallback_key
     return None
 
 
@@ -148,20 +161,21 @@ def _warn_insecure_once() -> None:
         _warned_insecure = True
 
 
+# Anthropic 官方价（claude.com/pricing 2026-06 核对）。opus 4.5/4.6/4.7/4.8 同价。
+_OPUS_PRICING = {
+    "input_cost_per_token": 5e-6,
+    "output_cost_per_token": 25e-6,
+    "cache_creation_input_token_cost": 6.25e-6,
+    "cache_read_input_token_cost": 0.5e-6,
+}
+
+
 def _fallback_pricing() -> dict:
     return {
-        "claude-opus-4-6": {
-            "input_cost_per_token": 15e-6,
-            "output_cost_per_token": 75e-6,
-            "cache_creation_input_token_cost": 18.75e-6,
-            "cache_read_input_token_cost": 1.5e-6,
-        },
-        "claude-opus-4-7": {
-            "input_cost_per_token": 15e-6,
-            "output_cost_per_token": 75e-6,
-            "cache_creation_input_token_cost": 18.75e-6,
-            "cache_read_input_token_cost": 1.5e-6,
-        },
+        "claude-opus-4-8": _OPUS_PRICING,
+        "claude-opus-4-7": _OPUS_PRICING,
+        "claude-opus-4-6": _OPUS_PRICING,
+        "claude-opus-4-5": _OPUS_PRICING,
         "claude-sonnet-4-6": {
             "input_cost_per_token": 3e-6,
             "output_cost_per_token": 15e-6,
@@ -169,10 +183,10 @@ def _fallback_pricing() -> dict:
             "cache_read_input_token_cost": 0.3e-6,
         },
         "claude-haiku-4-5-20251001": {
-            "input_cost_per_token": 0.8e-6,
-            "output_cost_per_token": 4e-6,
-            "cache_creation_input_token_cost": 1e-6,
-            "cache_read_input_token_cost": 0.08e-6,
+            "input_cost_per_token": 1e-6,
+            "output_cost_per_token": 5e-6,
+            "cache_creation_input_token_cost": 1.25e-6,
+            "cache_read_input_token_cost": 0.1e-6,
         },
         "gpt-5": {
             "input_cost_per_token": 1.25e-6,
