@@ -25,7 +25,11 @@ _FAMILY_FALLBACK = (
     ("claude-opus", "claude-opus-4-8"),
     ("claude-sonnet", "claude-sonnet-4-6"),
     ("claude-haiku", "claude-haiku-4-5-20251001"),
+    ("claude-fable", "claude-fable-5"),
 )
+
+# 解析不到定价的模型只提示一次，避免聚合时每条 entry 刷屏
+_warned_unknown_models: set[str] = set()
 
 
 def get_pricing() -> dict:
@@ -44,6 +48,7 @@ def calculate_cost(entry: UsageEntry) -> float:
     pricing = get_pricing()
     model_key = _resolve_model_key(entry.model, pricing)
     if model_key is None:
+        _warn_unknown_model_once(entry.model)
         return 0.0
 
     info = pricing[model_key]
@@ -83,6 +88,17 @@ def _resolve_model_key(model: str, pricing: dict) -> str | None:
         if ml.startswith(prefix) and fallback_key in pricing:
             return fallback_key
     return None
+
+
+def _warn_unknown_model_once(model: str) -> None:
+    # 全新系列（非 opus/sonnet/haiku/fable）连系列兜底都接不住，成本会按 $0 计；显形以免静默少算
+    if model and model not in _warned_unknown_models:
+        _warned_unknown_models.add(model)
+        print(
+            f"token-tracker: 未知模型 {model!r} 缺少定价，本次成本按 $0 计；"
+            "litellm 收录后自动恢复，或在 cost.py 的 _fallback_pricing 补内置价",
+            file=sys.stderr,
+        )
 
 
 def _load_pricing() -> dict:
@@ -169,9 +185,18 @@ _OPUS_PRICING = {
     "cache_read_input_token_cost": 0.5e-6,
 }
 
+# Fable 5 / Mythos 5 同价，是 Opus 档的 2 倍（$10/$50 每百万 token）
+_FABLE_PRICING = {
+    "input_cost_per_token": 10e-6,
+    "output_cost_per_token": 50e-6,
+    "cache_creation_input_token_cost": 12.5e-6,
+    "cache_read_input_token_cost": 1.0e-6,
+}
+
 
 def _fallback_pricing() -> dict:
     return {
+        "claude-fable-5": _FABLE_PRICING,
         "claude-opus-4-8": _OPUS_PRICING,
         "claude-opus-4-7": _OPUS_PRICING,
         "claude-opus-4-6": _OPUS_PRICING,

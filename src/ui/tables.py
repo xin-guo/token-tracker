@@ -73,8 +73,10 @@ def _group_by_agent(stats) -> dict[str, list]:
 
 
 MODEL_SHORT = {
+    "claude-fable-5": "Fable 5",
     "claude-opus-4-6": "Opus 4.6",
     "claude-opus-4-7": "Opus 4.7",
+    "claude-opus-4-8": "Opus 4.8",
     "claude-sonnet-4-6": "Sonnet 4.6",
     "claude-sonnet": "Sonnet",
     "claude-haiku-4-5-20251001": "Haiku 4.5",

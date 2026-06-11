@@ -114,6 +114,48 @@ def test_fallback_pricing_includes_openai_models():
         assert pricing[k].get("input_cost_per_token", 0) > 0
 
 
+def test_fallback_pricing_includes_fable():
+    # Fable 5 是全新系列，必须有专属兜底价（不能退回 Opus，价格差一倍）
+    info = cost._fallback_pricing()["claude-fable-5"]
+    assert info["input_cost_per_token"] == pytest.approx(10e-6)
+    assert info["output_cost_per_token"] == pytest.approx(50e-6)
+
+
+def test_fable_cost_is_double_opus(monkeypatch):
+    monkeypatch.setattr(cost, "_pricing", cost._fallback_pricing())
+    entry = make_entry(
+        model="claude-fable-5",
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+        cache_creation_tokens=1_000_000,
+        cache_read_tokens=1_000_000,
+    )
+    # 10 + 50 + 12.5 + 1.0
+    assert cost.calculate_cost(entry) == pytest.approx(73.5)
+
+
+def test_fable_dated_variant_resolves_via_prefix(monkeypatch):
+    monkeypatch.setattr(cost, "_pricing", cost._fallback_pricing())
+    entry = make_entry(model="claude-fable-5-20260601", input_tokens=1_000_000)
+    assert cost.calculate_cost(entry) == pytest.approx(10.0)
+
+
+def test_unknown_fable_variant_falls_back_to_family(monkeypatch):
+    # 未来的 fable-6 即便 litellm 未收录，也按系列退回 fable-5，不归零
+    monkeypatch.setattr(cost, "_pricing", cost._fallback_pricing())
+    entry = make_entry(model="claude-fable-6-20270101", input_tokens=1_000_000)
+    assert cost.calculate_cost(entry) == pytest.approx(10.0)
+
+
+def test_unknown_model_warns_once(fixed_pricing, monkeypatch, capsys):
+    # 全新系列接不住时按 $0 计，但必须显形提醒；同一模型只提示一次
+    monkeypatch.setattr(cost, "_warned_unknown_models", set())
+    assert cost.calculate_cost(make_entry(model="claude-quartz-1", input_tokens=1_000_000)) == 0.0
+    assert cost.calculate_cost(make_entry(model="claude-quartz-1", input_tokens=500_000)) == 0.0
+    err = capsys.readouterr().err
+    assert err.count("claude-quartz-1") == 1
+
+
 def test_fresh_cache_is_used_without_fetching(tmp_path, monkeypatch):
     cache = tmp_path / "pricing_cache.json"
     cache.write_text('{"gpt-5": {"input_cost_per_token": 1e-6}}', encoding="utf-8")
