@@ -134,6 +134,21 @@ def test_fable_cost_is_double_opus(monkeypatch):
     assert cost.calculate_cost(entry) == pytest.approx(73.5)
 
 
+def test_opus_4_8_cost_is_priced(monkeypatch):
+    # Backport guard: 4c4459e89 added opus-4-8 pricing but no test; without this,
+    # dropping the opus-4-8 fallback entry leaves the suite green while cost -> $0.
+    monkeypatch.setattr(cost, "_pricing", cost._fallback_pricing())
+    entry = make_entry(
+        model="claude-opus-4-8",
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+        cache_creation_tokens=1_000_000,
+        cache_read_tokens=1_000_000,
+    )
+    # 5 + 25 + 6.25 + 0.5
+    assert cost.calculate_cost(entry) == pytest.approx(36.75)
+
+
 def test_fable_dated_variant_resolves_via_prefix(monkeypatch):
     monkeypatch.setattr(cost, "_pricing", cost._fallback_pricing())
     entry = make_entry(model="claude-fable-5-20260601", input_tokens=1_000_000)
