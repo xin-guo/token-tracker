@@ -30,7 +30,7 @@ CODEX_STATUS_LINE = [
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
 """Claude Code statusLine — 状态栏显示 + 数据持久化到 tt-status.json"""
 __version__ = "__HOOK_VERSION__"
-import json, os, re, subprocess, sys, tempfile
+import json, os, re, subprocess, sys, tempfile, unicodedata
 from datetime import datetime, timezone
 
 STATUS_FILE = os.path.expanduser("~/.claude/tt-status.json")
@@ -46,10 +46,24 @@ if sys.platform == "win32":
 
 
 def vlen(s):
-    return len(ANSI_RE.sub("", s))
+    # display width: East-Asian wide/fullwidth glyphs occupy 2 cells (fixes CJK lines 2/3).
+    # If a terminal renders Ambiguous-width as 2, add 'A' to the set (see plan's COLUMNS=76 test).
+    return sum(2 if unicodedata.east_asian_width(ch) in ('W', 'F') else 1
+               for ch in ANSI_RE.sub("", s))
 
 
 def get_width():
+    # COLUMNS: Claude Code sets it for the statusLine subprocess (CC v2.1.153+) — the documented
+    # width source, since get_terminal_size/dev-tty fail when stdin/stderr are pipes. Defensive:
+    # unset / "0" / non-numeric falls through to the original detection chain (no regression).
+    try:
+        c = os.environ.get("COLUMNS")
+        if c and c.isdigit():
+            w = int(c)
+            if w > 0:
+                return max(1, w - 4)
+    except Exception:
+        pass
     try:
         return max(1, os.get_terminal_size(2).columns - 4)
     except Exception:
