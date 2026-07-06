@@ -178,32 +178,35 @@ def render(data, now):
                 if remain > 0:
                     reset_str = f" {C['dim']}({fmt_duration(remain)}){C['reset']}"
             rl_parts.append((
-                f"{C['blue']}{label}:{C['reset']}{progress_bar(pct, bar_w)}{reset_str}",
-                f"{C['blue']}{label}:{C['reset']}{progress_bar(pct, bar_w)}",
-                f"{C['blue']}{label}:{C['reset']}{pct:.0f}%",
+                f"{C['blue']}{label}:{C['reset']}{progress_bar(pct, bar_w)}{reset_str}",  # p0: bar + countdown
+                f"{C['blue']}{label}:{C['reset']}{progress_bar(pct, bar_w)}",              # p1: bar, no countdown (unused)
+                f"{C['blue']}{label}:{C['reset']}{pct:.0f}%",                              # p2: % only
+                f"{C['blue']}{label}:{C['reset']} {pct:.0f}%{reset_str}",                  # p3: no bar, % + countdown
             ))
 
     ctx_parts = []
     if ctx.get("used_percentage") is not None:
         size = ctx.get("context_window_size", 0)
         ctx_parts = [
-            f"{C['blue']}{fmt_tokens(size)} Context:{C['reset']}{progress_bar(ctx['used_percentage'], bar_w)}",
-            f"{C['blue']}{fmt_tokens(size)} CTX:{C['reset']}{ctx['used_percentage']:.0f}%",
+            f"{C['blue']}{fmt_tokens(size)} Context:{C['reset']}{progress_bar(ctx['used_percentage'], bar_w)}",  # ctx0: bar
+            f"{C['blue']}{fmt_tokens(size)} CTX:{C['reset']}{ctx['used_percentage']:.0f}%",                        # ctx1: short, % only
+            f"{C['blue']}{fmt_tokens(size)} Context:{C['reset']} {ctx['used_percentage']:.0f}%",                   # ctx2: no bar, % (full label)
         ]
 
-    # 尝试完整版（带进度条+reset time）
+    # full: bars + reset countdown
     full = line1 + [p[0] for p in rl_parts] + (ctx_parts[:1] if ctx_parts else [])
     candidate = " | ".join(full)
     if vlen(candidate) <= W:
         line1 = full
     else:
-        # 去掉 reset time
-        no_reset = line1 + [p[1] for p in rl_parts] + (ctx_parts[:1] if ctx_parts else [])
-        candidate = " | ".join(no_reset)
+        # tight: drop the progress bars first, KEEP % + reset countdown (user preference).
+        # ctx_parts[2:3] is the no-bar "Context: %" form — must exist or context vanishes here.
+        no_bars = line1 + [p[3] for p in rl_parts] + (ctx_parts[2:3] if ctx_parts else [])
+        candidate = " | ".join(no_bars)
         if vlen(candidate) <= W:
-            line1 = no_reset
+            line1 = no_bars
         else:
-            # 去掉进度条，只留百分比
+            # narrower still: % only (drop the countdown too)
             minimal = line1 + [p[2] for p in rl_parts] + (ctx_parts[1:2] if ctx_parts else [])
             line1 = minimal
 
